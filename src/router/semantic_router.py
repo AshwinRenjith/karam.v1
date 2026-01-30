@@ -1,10 +1,15 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, Iterable, List, NamedTuple, Sequence, Tuple, Union
-import math
-
+from typing import Dict, Iterable, List, NamedTuple, Optional, Sequence, Tuple, Union
 import torch
+
+try:
+    from sentence_transformers import SentenceTransformer
+except Exception as exc:  # pragma: no cover - optional dependency
+    raise ImportError(
+        "Missing sentence-transformers. Install dependencies with: pip install -r requirements.txt"
+    ) from exc
 
 
 class RouteResult(NamedTuple):
@@ -15,20 +20,24 @@ class RouteResult(NamedTuple):
 
 @dataclass
 class VectorEncoder:
-    dim: int = 384
+    model_name: str = "all-MiniLM-L6-v2"
+    _model: Optional["SentenceTransformer"] = None
+
+    def _get_device(self) -> str:
+        return "mps" if torch.backends.mps.is_available() else "cpu"
+
+    def _ensure_model(self) -> "SentenceTransformer":
+        if self._model is None:
+            self._model = SentenceTransformer(self.model_name)
+            self._model = self._model.to(self._get_device())
+        return self._model
 
     def encode(self, texts: Union[str, Sequence[str]]) -> torch.Tensor:
         if isinstance(texts, str):
             texts = [texts]
-        vectors = torch.zeros(len(texts), self.dim, dtype=torch.float32)
-        for i, text in enumerate(texts):
-            tokens = [t for t in text.lower().split() if t]
-            for token in tokens:
-                idx = hash(token) % self.dim
-                vectors[i, idx] += 1.0
-            if tokens:
-                vectors[i] = vectors[i] / math.sqrt(len(tokens))
-        return vectors
+        model = self._ensure_model()
+        vectors = model.encode(texts, convert_to_tensor=True)
+        return vectors.to(dtype=torch.float32)
 
 
 @dataclass
@@ -77,8 +86,8 @@ class SemanticRouter:
     centroids: CentroidManager
     gate: RouterGate
 
-    def __init__(self, threshold: float = 0.75, dim: int = 384) -> None:
-        self.encoder = VectorEncoder(dim=dim)
+    def __init__(self, threshold: float = 0.75, model_name: str = "all-MiniLM-L6-v2") -> None:
+        self.encoder = VectorEncoder(model_name=model_name)
         self.centroids = CentroidManager()
         self.gate = RouterGate(threshold=threshold)
 
@@ -94,8 +103,8 @@ class SemanticRouter:
 
 if __name__ == "__main__":
     router = SemanticRouter()
-    dummy_vector = router.encoder.encode("quantum physics")
-    router.centroids.update("physics_node", dummy_vector[0])
-    result = router.route("quantum field")
-    print(f"input shape={dummy_vector.shape}, output shape={torch.tensor([result.confidence_score]).shape}")
+    dummy_vector = router.encoder.encode("Hello world")
+    router.centroids.update("greeting_node", dummy_vector[0])
+    result = router.route("Hi there")
+    print(f"vector shape={dummy_vector.shape}, node_id={result.node_id}, score={result.confidence_score}")
     assert isinstance(result.node_id, str)

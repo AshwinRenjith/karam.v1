@@ -130,7 +130,11 @@ class FractalTransformer(nn.Module):
         logits = self.lm_head(x)
         loss = None
         if targets is not None:
-            loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1))
+            shift_logits = logits[..., :-1, :].contiguous()
+            shift_labels = targets[..., 1:].contiguous()
+            loss = F.cross_entropy(
+                shift_logits.view(-1, shift_logits.size(-1)), shift_labels.view(-1)
+            )
         return logits, loss
 
     def bud(self, specialized_data_loader: Iterable[Tuple[torch.Tensor, torch.Tensor]]) -> "FractalTransformer":
@@ -157,12 +161,17 @@ class FractalTransformer(nn.Module):
             with torch.no_grad():
                 teacher_logits, _ = teacher(tokens)
             child_logits, _ = child(tokens)
+            shift_teacher_logits = teacher_logits[..., :-1, :].contiguous()
+            shift_child_logits = child_logits[..., :-1, :].contiguous()
+            shift_labels = targets[..., 1:].contiguous()
+
             hard_loss = F.cross_entropy(
-                child_logits.view(-1, child_logits.size(-1)), targets.view(-1)
+                shift_child_logits.view(-1, shift_child_logits.size(-1)),
+                shift_labels.view(-1),
             )
             soft_loss = F.kl_div(
-                F.log_softmax(child_logits / temperature, dim=-1),
-                F.softmax(teacher_logits / temperature, dim=-1),
+                F.log_softmax(shift_child_logits / temperature, dim=-1),
+                F.softmax(shift_teacher_logits / temperature, dim=-1),
                 reduction="batchmean",
             ) * (temperature**2)
             loss = alpha * hard_loss + (1 - alpha) * soft_loss

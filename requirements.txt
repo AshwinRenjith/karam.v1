@@ -1,5 +1,11 @@
+# Core AI Engine
 torch
 einops
+transformers
+sentence-transformers
+datasets
+
+# API & Runtime
 fastapi
 uvicorn
 pydantic
