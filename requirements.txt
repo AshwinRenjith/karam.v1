@@ -1,0 +1,5 @@
+torch
+einops
+fastapi
+uvicorn
+pydantic
