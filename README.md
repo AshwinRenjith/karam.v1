@@ -260,10 +260,10 @@ This is the complete path a sentence takes from raw text to gradient update.
 
 ```mermaid
 sequenceDiagram
-    participant DS as TinyStories Dataset<br/>(HuggingFace Streaming)
+    participant DS as TinyStories Dataset
     participant SD as StreamDataset
     participant DL as DataLoader
-    participant TK as FractalTokenizer<br/>(GPT-2)
+    participant TK as FractalTokenizer GPT-2
     participant MDL as FractalTransformer
     participant LOSS as Loss Function
     participant OPT as AdamW Optimizer
@@ -272,15 +272,15 @@ sequenceDiagram
     DS->>SD: sample["text"] = "Once upon a time..."
     Note over SD: Filter: len(text) >= 15
     SD->>TK: encode(text, max_len=513)
-    Note over TK: HuggingFace tokenizer<br/>padding=max_length, truncation=True<br/>→ tensor shape: (1, 513)
+    Note over TK: HuggingFace tokenizer, padding=max_length, truncation=True, tensor shape (1, 513)
     TK-->>SD: token_ids: (1, 513)
     Note over SD: Requires exactly 513 tokens<br/>to guarantee full-length batches
     SD->>DL: yield token_ids.squeeze(0) → (513,)
     DL->>MDL: batch: (4, 513)
-    Note over MDL: inputs  = batch[:, :-1] → (4, 512)<br/>targets = batch[:, 1:]  → (4, 512)
+    Note over MDL: inputs = batch[:,:-1] shape (4,512) | targets = batch[:,1:] shape (4,512)
     MDL->>MDL: token_emb(inputs) + pos_emb(positions)
     Note over MDL: x shape: (4, 512, 512)
-    MDL->>MDL: × 6 TransformerBlocks<br/>Each: LayerNorm → CausalMHA → Residual<br/>       LayerNorm → GELU FFN → Residual
+    MDL->>MDL: x6 TransformerBlocks: LayerNorm+CausalMHA+Residual, LayerNorm+GELU FFN+Residual
     MDL->>MDL: lm_head(x) → logits (4, 512, 50257)
     MDL->>LOSS: logits.reshape(2048, 50257) vs targets.reshape(2048)
     LOSS->>OPT: scalar loss (cross-entropy)
@@ -354,7 +354,7 @@ flowchart LR
 
 ```mermaid
 flowchart TD
-    USR([👤 User: "Explain black holes"]) --> CC
+    USR(["👤 User — Explain black holes"]) --> CC
 
     CC["chat_client.py
     POST /generate
@@ -658,7 +658,7 @@ For query $q \in \mathbb{R}^{384}$ and each expert centroid $c_n \in \mathbb{R}^
 
 $$\text{sim}(q, c_n) = \frac{q \cdot c_n}{\|q\| \cdot \|c_n\|}$$
 
-$$\text{route}(q) = \begin{cases} \arg\max_n \;\text{sim}(q, c_n) & \text{if } \max_n\text{sim} \ge \tau \\ \text{root\_node} & \text{otherwise} \end{cases}$$
+$$\text{route}(q) = \begin{cases} \arg\max_n \;\text{sim}(q, c_n) & \text{if } \max_n \text{sim} \ge \tau \\ \text{root-node} & \text{otherwise} \end{cases}$$
 
 with default threshold $\tau = 0.75$.
 
