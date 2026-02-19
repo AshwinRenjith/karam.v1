@@ -145,7 +145,7 @@ class FractalSupervisor:
         self.registry.register_node(
             child_id,
             {
-                "parent_id": "mother",
+                "parent_id": self.mother_id,
                 "depth": child.config.depth,
                 "centroid_vector": centroid[0].cpu().tolist(),
                 "file_path": str(weights_path),
@@ -153,8 +153,15 @@ class FractalSupervisor:
                     "d_model": child.config.d_model,
                     "n_heads": child.config.n_heads,
                     "n_layers": child.config.n_layers,
+                    "d_ff": child.config.d_ff,
+                    "vocab_size": child.config.vocab_size,
+                    "max_seq_len": child.config.max_seq_len,
+                    "pad_token_id": 50256,
                 },
                 "status": "active",
+                "arch_version": "v1",
+                "model_family": "fractal_transformer",
+                "checkpoint_compat": "strict",
             },
         )
 

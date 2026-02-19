@@ -4,156 +4,162 @@ import gc
 import os
 import time
 from pathlib import Path
-from typing import Generator
+
+# --- 1. MEMORY OPTIMIZATION (Unlock extra VRAM) ---
+os.environ["PYTORCH_MPS_HIGH_WATERMARK_RATIO"] = "0.0"
 
 import torch
-from tqdm import tqdm
+import torch.nn as nn
+import torch.optim as optim
+from torch.utils.data import DataLoader, IterableDataset
 
-# Imports from your architecture
-from src.models.fractal_transformer import FractalConfig, FractalTransformer
-from src.utils.tokenizer import FractalTokenizer
-from src.registry.node_registry import NodeRegistry
-from src.utils.device import get_default_device
-
-# External libraries
 try:
     from datasets import load_dataset
 except ImportError:
     raise ImportError("Install datasets: pip install datasets")
 
+from src.models.fractal_transformer import FractalConfig, FractalTransformer
+from src.registry.node_registry import NodeRegistry
+from src.utils.device import get_default_device
+from src.utils.tokenizer import FractalTokenizer
 
-def pretrain_mother_node(
-    steps: int = 1000,
-    batch_size: int = 8,
-    save_path: str = "./weights/root_node.pt",
-    registry_path: str = "./registry.json",
-) -> None:
-    """Pre-train the Mother Node on wikitext-2 to establish base knowledge."""
+# --- CONFIGURATION ---
+STEPS = 5000
+BATCH_SIZE = 4  # Reduced to prevent OOM on Mac
+SEQ_LEN = 512
+LEARNING_RATE = 3e-4
+DATASET_NAME = "roneneldan/TinyStories"
+
+
+class StreamDataset(IterableDataset):
+    def __init__(self, tokenizer: FractalTokenizer, max_seq_len: int) -> None:
+        self.tokenizer = tokenizer
+        self.max_seq_len = max_seq_len
+        self.ds = load_dataset(DATASET_NAME, split="train", streaming=True)
+
+    def __iter__(self):
+        for sample in self.ds:
+            text = sample.get("text", "")
+            if len(text) < 15:
+                continue
+            token_ids = self.tokenizer.encode(text, max_len=self.max_seq_len + 1)
+            if token_ids.size(1) < self.max_seq_len + 1:
+                continue
+            yield token_ids.squeeze(0)
+
+
+def pretrain_mother_node(steps: int = STEPS, batch_size: int = BATCH_SIZE) -> None:
     print("=" * 60)
-    print("🌅 PHASE 6: THE AWAKENING (Mother Node Pre-training)")
+    print(f"🌅 PHASE 10: THE STORYTELLER ({steps} Steps | Batch {batch_size})")
     print("=" * 60)
 
-    # 1. Setup Hardware
     device_info = get_default_device()
-    device = device_info.device
-    print(f"🔧 Device Locked: {device} (MPS Enabled: {device_info.is_mps})")
+    print(f"🔧 Device Locked: {device_info.device} (MPS Enabled: {device_info.is_mps})")
 
-    # 2. Initialize the "Eye" (Tokenizer)
-    tokenizer = FractalTokenizer(model_name="gpt2")
+    tokenizer = FractalTokenizer()
+    registry = NodeRegistry(registry_path="./registry.json")
+    save_path = Path("./weights/root_node.pt")
+    save_path.parent.mkdir(parents=True, exist_ok=True)
 
-    # 3. Initialize the "Brain" (Mother Node)
-    # Matching architecture_specs.md prototype values
     config = FractalConfig(
         d_model=512,
         n_heads=8,
         n_layers=6,
         d_ff=2048,
         vocab_size=tokenizer.vocab_size,
-        max_seq_len=512,
+        max_seq_len=SEQ_LEN,
         dropout=0.1,
     )
 
-    model = FractalTransformer(config).to(device)
-    optimizer = torch.optim.AdamW(model.parameters(), lr=3e-4)
+    model = FractalTransformer(config).to(device_info.device)
     param_count = sum(p.numel() for p in model.parameters()) / 1e6
     print(f"🧠 Mother Node Initialized: {param_count:.2f}M Params")
 
-    # 4. Load Knowledge (Wikitext-2 is clean and fast)
-    print("📚 Streaming Wikitext-2 data...")
-    dataset = load_dataset("wikitext", "wikitext-2-v1", split="train", streaming=True)
+    optimizer = optim.AdamW(model.parameters(), lr=LEARNING_RATE, weight_decay=0.01)
+    criterion = nn.CrossEntropyLoss()
 
-    def data_generator() -> Generator[str, None, None]:
-        for item in dataset:
-            text = item["text"]
-            if len(text) > 50:  # Skip short headers/empty lines
-                yield text
+    print(f"📚 Streaming {DATASET_NAME}...")
+    dataset = StreamDataset(tokenizer, SEQ_LEN)
+    dataloader = DataLoader(dataset, batch_size=batch_size)
 
-    # 5. The Training Loop (The "Learning")
     model.train()
+    total_loss = 0.0
     start_time = time.time()
-    running_loss = 0.0
 
-    iterator = iter(data_generator())
+    print("🚀 Starting training run...")
 
-    print(f"🚀 Starting {steps} steps of pre-training...")
-    progress_bar = tqdm(range(steps))
-
-    for step in progress_bar:
-        try:
-            # Batch accumulation
-            batch_texts: list[str] = []
-            while len(batch_texts) < batch_size:
-                batch_texts.append(next(iterator))
-
-            # Tokenize
-            tokens = torch.cat(
-                [tokenizer.encode(t, max_len=config.max_seq_len) for t in batch_texts]
-            ).to(device)
-
-            # Forward Pass (Auto-regressive: Targets are same as inputs)
-            logits, loss = model(tokens, targets=tokens)
-
-            if loss is None:
-                continue
-
-            # Backward Pass
-            optimizer.zero_grad(set_to_none=True)
-            loss.backward()
-            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
-            optimizer.step()
-
-            running_loss += loss.item()
-            progress_bar.set_description(f"Loss: {loss.item():.4f}")
-
-            # Cleanup for M1
-            if step % 50 == 0:
-                if torch.cuda.is_available():
-                    torch.cuda.empty_cache()
-                gc.collect()
-
-        except StopIteration:
-            print("⚠️ Dataset exhausted, stopping early.")
+    step = 0
+    for batch in dataloader:
+        if step >= steps:
             break
 
-    avg_loss = running_loss / max(1, steps)
-    print(f"\n📊 Average Loss: {avg_loss:.4f}")
+        # MEMORY SAFETY: Aggressive cleanup
+        optimizer.zero_grad(set_to_none=True)
 
-    # 6. Save the "Educated" Brain
-    os.makedirs(os.path.dirname(save_path), exist_ok=True)
+        batch = batch.to(device_info.device)
+        inputs = batch[:, :-1]
+        targets = batch[:, 1:]
+
+        logits, _ = model(inputs)
+
+        bsz, seq_len, vocab = logits.shape
+        loss = criterion(logits.reshape(bsz * seq_len, vocab), targets.reshape(bsz * seq_len))
+
+        loss.backward()
+        torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+        optimizer.step()
+
+        total_loss += loss.item()
+
+        # Print Progress
+        if step % 50 == 0:
+            avg_loss = total_loss / (step + 1)
+            elapsed = time.time() - start_time
+            steps_per_sec = (step + 1) / elapsed if elapsed > 0 else 0.0
+            remaining = (steps - step) / steps_per_sec if steps_per_sec > 0 else 0.0
+            mins = int(remaining // 60)
+
+            print(
+                f"Step {step}/{steps} | Loss: {loss.item():.4f} "
+                f"(Avg: {avg_loss:.4f}) | ⏳ ~{mins}m left"
+            )
+
+            # MEMORY SAFETY: Clear cache periodically
+            if device_info.is_mps:
+                torch.mps.empty_cache()
+            gc.collect()
+
+        step += 1
+
     torch.save(model.state_dict(), save_path)
-    print(f"💾 Weights saved to {save_path}")
+    print(f"\n💾 Weights saved to {save_path}")
 
-    # 7. Register in Genesis (The Registry)
-    registry = NodeRegistry(registry_path=registry_path)
-
-    # Dummy centroid for the root (Zero vector or generic "everything")
-    # In production, this would be the mean of all English vectors.
-    dummy_centroid = [0.0] * 384  # 384 is dim of all-MiniLM-L6-v2
-
-    metadata = {
-        "parent_id": None,  # The Root has no parent
-        "depth": 0,
-        "centroid_vector": dummy_centroid,
-        "file_path": save_path,
-        "config": {
-            "d_model": config.d_model,
-            "n_heads": config.n_heads,
-            "n_layers": config.n_layers,
-            "vocab_size": config.vocab_size,
+    registry.register_node(
+        "root_node",
+        {
+            "parent_id": None,
+            "depth": 0,
+            "centroid_vector": [0.0] * 512,
+            "file_path": str(save_path),
+            "config": {
+                "d_model": config.d_model,
+                "n_heads": config.n_heads,
+                "n_layers": config.n_layers,
+                "vocab_size": config.vocab_size,
+                "d_ff": config.d_ff,
+                "max_seq_len": config.max_seq_len,
+                "pad_token_id": tokenizer._tokenizer.pad_token_id,
+            },
+            "status": "active",
+            "arch_version": "v1",
+            "model_family": "fractal_transformer",
+            "checkpoint_compat": "strict",
         },
-        "status": "active",
-    }
+    )
 
-    registry.register_node("root_node", metadata)
-    print("✅ Registry updated: 'root_node' is now online.")
-
-    elapsed = (time.time() - start_time) / 60
-    print(f"⏱️ Total Time: {elapsed:.1f} minutes")
-    print("=" * 60)
-    print("🎉 THE MOTHER NODE HAS AWAKENED!")
+    print("✅ Registry updated. 'root_node' is now online.")
     print("=" * 60)
 
 
 if __name__ == "__main__":
-    # Run slightly longer if you have time, 500 steps is bare minimum for "grammar"
-    pretrain_mother_node(steps=500, batch_size=4)
+    pretrain_mother_node()

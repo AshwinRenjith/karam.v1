@@ -15,7 +15,25 @@ from src.models.fractal_transformer import FractalConfig, FractalTransformer
 class ModelSwapper:
     active_models: Dict[str, FractalTransformer] = field(default_factory=dict)
 
-    def load_model(self, node_id: str, file_path: str, config: FractalConfig) -> FractalTransformer:
+    def load_model(
+        self,
+        node_id: str,
+        file_path: str,
+        config: FractalConfig,
+        checkpoint_arch_version: Optional[str] = None,
+        expected_arch_version: Optional[str] = None,
+    ) -> FractalTransformer:
+        if expected_arch_version is not None:
+            if checkpoint_arch_version is None:
+                raise ValueError(
+                    f"Node '{node_id}' is missing arch_version in registry; expected '{expected_arch_version}'"
+                )
+            if checkpoint_arch_version != expected_arch_version:
+                raise ValueError(
+                    f"Incompatible checkpoint arch for '{node_id}': "
+                    f"found '{checkpoint_arch_version}', expected '{expected_arch_version}'"
+                )
+
         device_info = get_default_device()
         model = FractalTransformer(config).to(device_info.device)
         if Path(file_path).exists():

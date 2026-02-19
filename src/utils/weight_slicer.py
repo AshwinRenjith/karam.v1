@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from typing import Tuple
 import torch
 
 
@@ -12,10 +11,6 @@ class WeightSlicer:
         return weight[:out_dim, :in_dim].clone()
 
     @staticmethod
-    def slice_bias(bias: torch.Tensor, out_dim: int) -> torch.Tensor:
-        return bias[:out_dim].clone()
-
-    @staticmethod
     def slice_embedding(weight: torch.Tensor, d_model: int) -> torch.Tensor:
         return weight[:, :d_model].clone()
 
@@ -24,17 +19,7 @@ class WeightSlicer:
         return weight[:d_model].clone()
 
     @staticmethod
-    def slice_qkv(weight: torch.Tensor, out_dim: int, in_dim: int) -> torch.Tensor:
-        return weight[:out_dim, :in_dim].clone()
-
-    @staticmethod
-    def slice_ffn(weight: torch.Tensor, out_dim: int, in_dim: int) -> torch.Tensor:
-        return weight[:out_dim, :in_dim].clone()
-
-    @staticmethod
-    def slice_projection(
-        weight: torch.Tensor, out_dim: int, in_dim: int
-    ) -> torch.Tensor:
+    def slice_projection(weight: torch.Tensor, out_dim: int, in_dim: int) -> torch.Tensor:
         return weight[:out_dim, :in_dim].clone()
 
 
