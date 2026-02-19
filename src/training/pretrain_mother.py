@@ -26,7 +26,7 @@ from src.utils.tokenizer import FractalTokenizer
 # --- CONFIGURATION ---
 STEPS = 5000
 BATCH_SIZE = 4  # Reduced to prevent OOM on Mac
-SEQ_LEN = 512
+SEQ_LEN = 256
 LEARNING_RATE = 3e-4
 DATASET_NAME = "roneneldan/TinyStories"
 
@@ -43,8 +43,7 @@ class StreamDataset(IterableDataset):
             if len(text) < 15:
                 continue
             token_ids = self.tokenizer.encode(text, max_len=self.max_seq_len + 1)
-            if token_ids.size(1) < self.max_seq_len + 1:
-                continue
+            token_ids = token_ids[:, : self.max_seq_len + 1]
             yield token_ids.squeeze(0)
 
 
@@ -57,8 +56,9 @@ def pretrain_mother_node(steps: int = STEPS, batch_size: int = BATCH_SIZE) -> No
     print(f"🔧 Device Locked: {device_info.device} (MPS Enabled: {device_info.is_mps})")
 
     tokenizer = FractalTokenizer()
+    pad_id = tokenizer._tokenizer.pad_token_id
     registry = NodeRegistry(registry_path="./registry.json")
-    save_path = Path("./weights/root_node.pt")
+    save_path = Path("./weights/root_node_v2.pt")
     save_path.parent.mkdir(parents=True, exist_ok=True)
 
     config = FractalConfig(
@@ -76,7 +76,7 @@ def pretrain_mother_node(steps: int = STEPS, batch_size: int = BATCH_SIZE) -> No
     print(f"🧠 Mother Node Initialized: {param_count:.2f}M Params")
 
     optimizer = optim.AdamW(model.parameters(), lr=LEARNING_RATE, weight_decay=0.01)
-    criterion = nn.CrossEntropyLoss()
+    criterion = nn.CrossEntropyLoss(ignore_index=pad_id)
 
     print(f"📚 Streaming {DATASET_NAME}...")
     dataset = StreamDataset(tokenizer, SEQ_LEN)
@@ -133,6 +133,7 @@ def pretrain_mother_node(steps: int = STEPS, batch_size: int = BATCH_SIZE) -> No
 
     torch.save(model.state_dict(), save_path)
     print(f"\n💾 Weights saved to {save_path}")
+    print("⚠️ Note: Ensure registry.json is cleared if this is a fresh architecture run.")
 
     registry.register_node(
         "root_node",
@@ -148,11 +149,11 @@ def pretrain_mother_node(steps: int = STEPS, batch_size: int = BATCH_SIZE) -> No
                 "vocab_size": config.vocab_size,
                 "d_ff": config.d_ff,
                 "max_seq_len": config.max_seq_len,
-                "pad_token_id": tokenizer._tokenizer.pad_token_id,
+                "pad_token_id": pad_id,
             },
             "status": "active",
-            "arch_version": "v1",
-            "model_family": "fractal_transformer",
+            "arch_version": "v2_rope_swiglu",
+            "model_family": "fractal_transformer_v2",
             "checkpoint_compat": "strict",
         },
     )

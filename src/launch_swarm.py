@@ -9,9 +9,9 @@ from src.registry.node_registry import NodeRegistry
 from src.runtime.inference_api import create_app
 
 
-def start_swarm(expected_arch_version: str = "v1") -> None:
+def start_swarm(expected_arch_version: str = "v2_rope_swiglu") -> None:
     print("=" * 60)
-    print("🛸 KARAM.v1 - SWARM INTERFACE INITIATED")
+    print("🛸 KARAM.v2 - SWARM INTERFACE INITIATED")
     print("=" * 60)
 
     registry_path = "./registry.json"

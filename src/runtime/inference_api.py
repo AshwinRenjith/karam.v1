@@ -38,7 +38,7 @@ def create_app(
     registry_path: str,
     root_config: FractalConfig,
     root_weights_path: str,
-    expected_arch_version: str = "v1",
+    expected_arch_version: str = "v2_rope_swiglu",
 ) -> "FastAPI":
     device_info = get_default_device()
     router = SemanticRouter()
